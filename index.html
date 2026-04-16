@@ -3,17 +3,17 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-<title>Planner Pro v2.7</title>
+<title>Planner Pro v2.9</title>
 <style>
-/* v2.6 스타일 유지 */
 :root { --bg-color: #f5f5f7; --card-color: #ffffff; --text-main: #1d1d1f; --text-sub: #86868b; --accent: #0071e3; --border: #d2d2d7; --radius-m: 12px; --radius-l: 18px; --shadow: 0 8px 24px rgba(0, 0, 0, 0.08); }
 *{box-sizing:border-box;margin:0;padding:0;outline:none;}
 body{font-family:'Pretendard', system-ui, sans-serif;background:var(--bg-color);color:var(--text-main);-webkit-font-smoothing:antialiased;}
 .app{max-width:960px;margin:0 auto;padding:1.5rem;}
 .app-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;}
-.sync-status{font-size:12px;display:flex;align-items:center;gap:6px;background:#fff;padding:6px 12px;border-radius:20px;box-shadow:var(--shadow);}
+.sync-status{font-size:12px;display:flex;align-items:center;gap:6px;background:#fff;padding:6px 12px;border-radius:20px;box-shadow:var(--shadow); cursor:pointer;}
 .sync-dot{width:8px;height:8px;border-radius:50%;background:#28a745;}
 .sync-dot.saving{background:#ffc107;animation:pulse .8s infinite;}
+.sync-dot.error{background:#ff3b30;}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
 .tabs{display:flex;gap:4px;margin-bottom:1.5rem;background:#e3e3e6;padding:4px;border-radius:var(--radius-m);}
 .tab{flex:1;padding:12px;border-radius:10px;border:none;background:transparent;cursor:pointer;font-size:15px;color:var(--text-sub);font-weight:600;}
@@ -56,8 +56,11 @@ body{font-family:'Pretendard', system-ui, sans-serif;background:var(--bg-color);
 
 <div class="app">
   <div class="app-header">
-    <h1>Planner Pro v2.7</h1>
-    <div class="sync-status"><div class="sync-dot" id="sync-dot"></div><span id="sync-label">동기화됨</span></div>
+    <h1>Planner Pro v2.9</h1>
+    <div class="sync-status" onclick="init()" title="강제 동기화">
+      <div class="sync-dot" id="sync-dot"></div>
+      <span id="sync-label">동기화됨</span>
+    </div>
   </div>
 
   <div class="tabs" id="tabs">
@@ -123,21 +126,9 @@ body{font-family:'Pretendard', system-ui, sans-serif;background:var(--bg-color);
     <div class="pal-grid" id="edit-pal" style="margin-bottom:20px;"></div>
     <div style="display:flex; justify-content:flex-end; gap:8px;">
       <button class="btn" onclick="closeEditModal()">취소</button>
-      <button class="btn primary" onclick="submitEdit()">수정 완료</button>
+      <button class="btn primary" id="edit-submit-btn" onclick="submitEdit()">수정 완료</button>
     </div>
   </div>
-</div>
-
-<div id="del-confirm-modal" class="overlay">
-    <div class="modal" style="max-width:350px; text-align:center;">
-        <h3>반복 일정 삭제</h3>
-        <p id="del-msg" style="margin:15px 0; font-size:14px; color:var(--text-sub);">삭제 방식을 선택하세요.</p>
-        <div style="display:flex; flex-direction:column; gap:10px;">
-            <button class="btn" onclick="executeDelete('single')">이 날짜만 삭제</button>
-            <button class="btn danger" onclick="executeDelete('all')">전체 일정 삭제</button>
-            <button class="btn" style="border:none;" onclick="g('del-confirm-modal').classList.remove('on')">취소</button>
-        </div>
-    </div>
 </div>
 
 <script>
@@ -150,24 +141,49 @@ let todos=[], memos=[], selCol=COLS[4], editCol='', calY=new Date().getFullYear(
 const g=id=>document.getElementById(id);
 
 async function init(){
+  g('sync-dot').className = 'sync-dot saving';
+  g('sync-label').textContent = '불러오는 중...';
   try {
-    const tr=await fetch(SB_URL+'/rest/v1/todos?select=*',{headers:HEADERS});
-    todos=(await tr.json()).map(r=>r.data);
-    
-    // 불필요한 데이터 정리
-    todos = todos.filter(t => !t.text.includes("무매 TQQQ 20분할"));
+    const tr=await fetch(`${SB_URL}/rest/v1/todos?select=*`,{headers:HEADERS});
+    const todoData = await tr.json();
+    todos=todoData.map(r=>r.data).filter(t => !t.text.includes("무매 TQQQ"));
 
-    const mr=await fetch(SB_URL+'/rest/v1/memos?select=*',{headers:HEADERS});
-    memos=(await mr.json()).map(r=>r.data);
+    const mr=await fetch(`${SB_URL}/rest/v1/memos?select=*`,{headers:HEADERS});
+    const memoData = await mr.json();
+    memos=memoData.map(r=>r.data);
+
     buildPal('main-pal', true); renderCal(); renderDayList(); renderMemos();
-  } catch(e) {}
+    g('sync-dot').className = 'sync-dot';
+    g('sync-label').textContent = '동기화됨';
+  } catch(e) {
+    g('sync-dot').className = 'sync-dot error';
+    g('sync-label').textContent = '연결 오류';
+  }
 }
 
+// 저장 로직 강화: 모든 데이터 변경 시 이 함수가 끝날 때까지 대기
 async function saveT(){
-  g('sync-dot').className='sync-dot saving';
-  const ups=todos.map((t,idx)=>({id:t.id, data:{...t, order:idx}, updated_at:new Date()}));
-  await fetch(SB_URL+'/rest/v1/todos',{method:'POST',headers:{...HEADERS,'Prefer':'resolution=merge-duplicates'},body:JSON.stringify(ups)});
-  g('sync-dot').className='sync-dot ok';
+  const dot = g('sync-dot');
+  const label = g('sync-label');
+  dot.className = 'sync-dot saving';
+  label.textContent = '저장 중...';
+
+  try {
+    const ups = todos.map((t, idx) => ({ id: t.id, data: { ...t, order: idx }, updated_at: new Date().toISOString() }));
+    const response = await fetch(`${SB_URL}/rest/v1/todos`, {
+      method: 'POST',
+      headers: { ...HEADERS, 'Prefer': 'resolution=merge-duplicates' },
+      body: JSON.stringify(ups)
+    });
+    if (!response.ok) throw new Error('Save failed');
+    dot.className = 'sync-dot';
+    label.textContent = '동기화됨';
+    return true;
+  } catch (error) {
+    dot.className = 'sync-dot error';
+    label.textContent = '저장 실패';
+    return false;
+  }
 }
 
 function buildPal(target, isMain){
@@ -218,13 +234,9 @@ function renderCal(){
         const isCtrl=e.dataTransfer.getData('isCtrl')==='true';
         const t=todos.find(x=>x.id===tid);
         if(t){
-            if(isCtrl){
-                todos.push({...t, id:Date.now(), date:cell.dataset.date, order:todos.length, exDates:[]});
-            } else {
-                t.date=cell.dataset.date;
-                if(t.exDates) t.exDates=[]; 
-            }
-            renderCal(); renderDayList(); saveT();
+            if(isCtrl){ todos.push({...t, id:Date.now(), date:cell.dataset.date, order:todos.length, exDates:[]}); }
+            else { t.date=cell.dataset.date; if(t.exDates) t.exDates=[]; }
+            await saveT(); renderCal(); renderDayList();
         }
     };
     cell.onclick=()=>{selDay=ds; renderCal(); renderDayList();};
@@ -248,97 +260,88 @@ function renderDayList(){
   });
 }
 
-function handleDelete(id){
+async function handleDelete(id){
     const t = todos.find(x=>x.id===id);
-    if(t.repeat && t.repeat !== 'none'){
-        pendingDelId = id;
-        g('del-confirm-modal').classList.add('on');
-    } else {
-        if(confirm('삭제하시겠습니까?')){ todos=todos.filter(x=>x.id!==id); renderCal(); renderDayList(); saveT(); }
-    }
+    if(t.repeat && t.repeat !== 'none'){ pendingDelId = id; g('del-confirm-modal').classList.add('on'); }
+    else { if(confirm('삭제하시겠습니까?')){ todos=todos.filter(x=>x.id!==id); await saveT(); renderCal(); renderDayList(); } }
 }
 
-function executeDelete(type){
+async function executeDelete(type){
     const t = todos.find(x=>x.id===pendingDelId);
     if(!t) return;
-    if(type === 'all'){
-        todos = todos.filter(x=>x.id!==pendingDelId);
-    } else {
-        if(!t.exDates) t.exDates = [];
-        if(!t.exDates.includes(selDay)) t.exDates.push(selDay);
-    }
-    g('del-confirm-modal').classList.remove('on');
-    renderCal(); renderDayList(); saveT();
+    if(type === 'all'){ todos = todos.filter(x=>x.id!==pendingDelId); }
+    else { if(!t.exDates) t.exDates = []; t.exDates.push(selDay); }
+    g('del-confirm-modal').classList.remove('on'); 
+    await saveT(); renderCal(); renderDayList();
 }
 
-function toggleT(id){ const t=todos.find(x=>x.id===id); t.done=!t.done; renderCal(); renderDayList(); saveT(); }
-
-// 메모 관련 함수 (기존 유지)
-function exec(cmd, val=null){ document.execCommand(cmd, false, val); g('m-editor').focus(); }
-function handleImg(input){
-  if(input.files && input.files[0]){
-    const reader=new FileReader(); reader.onload=e=>document.execCommand('insertImage', false, e.target.result);
-    reader.readAsDataURL(input.files[0]);
-  }
+async function toggleT(id){ 
+  const t=todos.find(x=>x.id===id); 
+  t.done=!t.done; 
+  await saveT(); 
+  renderCal(); 
+  renderDayList(); 
 }
+
+// 메모 저장 로직도 비동기 대기 추가
 g('m-save').onclick=async()=>{
   const title = g('m-title').value; const content = g('m-editor').innerHTML; if(!title) return;
   if(curMemoEditId){
     const m = memos.find(x=>x.id===curMemoEditId); m.title = title; m.content = content; curMemoEditId = null; g('edit-indicator').style.display='none';
   } else { memos.push({id:Date.now(), title, content, ts:new Date().toLocaleString()}); }
-  renderMemos(); g('m-title').value=''; g('m-editor').innerHTML='';
-  await fetch(SB_URL+'/rest/v1/memos',{method:'POST',headers:{...HEADERS,'Prefer':'resolution=merge-duplicates'},body:JSON.stringify(memos.map(m=>({id:m.id, data:m}))) });
+  
+  g('sync-dot').className = 'sync-dot saving';
+  const res = await fetch(`${SB_URL}/rest/v1/memos`,{method:'POST',headers:{...HEADERS,'Prefer':'resolution=merge-duplicates'},body:JSON.stringify(memos.map(m=>({id:m.id, data:m}))) });
+  if(res.ok) {
+    g('sync-dot').className = 'sync-dot';
+    renderMemos(); g('m-title').value=''; g('m-editor').innerHTML='';
+  }
 };
-function renderMemos(){
-  g('memo-list').innerHTML=memos.sort((a,b)=>b.id-a.id).map(m=>`
-    <div class="memo-card">
-      <div class="memo-actions"><button class="btn" onclick="editMemo(${m.id})">편집</button><button class="btn" style="color:red;" onclick="delMemo(${m.id})">삭제</button></div>
-      <h4>${m.title}</h4><div style="font-size:14px; margin-top:10px;">${m.content}</div>
-    </div>
-  `).join('');
-}
-function editMemo(id){ const m = memos.find(x=>x.id===id); g('m-title').value = m.title; g('m-editor').innerHTML = m.content; curMemoEditId = id; g('edit-indicator').style.display='inline'; window.scrollTo({top:0, behavior:'smooth'}); }
-async function delMemo(id){ if(confirm('삭제?')){memos=memos.filter(x=>x.id!==id); renderMemos(); await fetch(`${SB_URL}/rest/v1/memos?id=eq.${id}`,{method:'DELETE',headers:HEADERS});}}
 
-// 일정 수정 로직 (중요도 추가)
 function openEdit(id){ 
-    const t=todos.find(x=>x.id===id); 
-    curEditId=id; 
-    editCol=t.col; 
-    g('edit-ti').value=t.text; 
-    g('edit-date').value=t.date; 
-    g('edit-repeat').value=t.repeat||'none'; 
-    g('edit-priority').value=t.priority || '0'; // 중요도 값 불러오기
-    buildPal('edit-pal', false); 
-    g('edit-modal').classList.add('on'); 
+    const t=todos.find(x=>x.id===id); curEditId=id; editCol=t.col; 
+    g('edit-ti').value=t.text; g('edit-date').value=t.date; g('edit-repeat').value=t.repeat||'none'; g('edit-priority').value=t.priority || '0'; 
+    buildPal('edit-pal', false); g('edit-modal').classList.add('on'); 
 }
 
-function submitEdit(){ 
+async function submitEdit(){ 
+    const btn = g('edit-submit-btn');
+    btn.disabled = true; btn.textContent = '저장 중...';
+    
     const t=todos.find(x=>x.id===curEditId); 
-    t.text=g('edit-ti').value; 
-    t.date=g('edit-date').value; 
-    t.repeat=g('edit-repeat').value; 
-    t.priority=g('edit-priority').value; // 중요도 값 저장
-    t.col=editCol; 
-    g('edit-modal').classList.remove('on'); 
-    renderCal(); renderDayList(); saveT(); 
+    t.text=g('edit-ti').value; t.date=g('edit-date').value; t.repeat=g('edit-repeat').value; t.priority=g('edit-priority').value; t.col=editCol; 
+    
+    const success = await saveT();
+    if(success) {
+      g('edit-modal').classList.remove('on'); 
+      renderCal(); renderDayList(); 
+    } else {
+      alert('저장에 실패했습니다. 다시 시도해 주세요.');
+    }
+    btn.disabled = false; btn.textContent = '수정 완료';
 }
 
-function closeEditModal(){ g('edit-modal').classList.remove('on'); }
-
-function moveOrder(id, dir){
+async function moveOrder(id, dir){
   const t = todos.find(x => x.id === id); const same = todos.filter(x => isVisible(x, t.date)).sort((a,b)=>a.order-b.order); const idx = same.findIndex(x => x.id === id);
   if(dir==='up' && idx>0){ [same[idx].order, same[idx-1].order] = [same[idx-1].order, same[idx].order]; }
   else if(dir==='down' && idx<same.length-1){ [same[idx].order, same[idx+1].order] = [same[idx+1].order, same[idx].order]; }
-  renderDayList(); saveT();
+  await saveT(); renderDayList();
 }
 
 g('t-add').onclick=async()=>{
   const val=g('t-inp').value.trim(); if(!val) return;
   todos.push({id:Date.now(), text:val, date:selDay, col:selCol, done:false, priority:g('t-priority').value, repeat:g('t-repeat').value, order:todos.length, exDates:[]});
-  g('t-inp').value=''; renderCal(); renderDayList(); saveT();
+  const success = await saveT();
+  if(success) { g('t-inp').value=''; renderCal(); renderDayList(); }
 };
 
+// ... (나머지 헬퍼 함수들은 동일)
+function closeEditModal(){ g('edit-modal').classList.remove('on'); }
+function exec(cmd, val=null){ document.execCommand(cmd, false, val); g('m-editor').focus(); }
+function handleImg(input){ if(input.files && input.files[0]){ const reader=new FileReader(); reader.onload=e=>document.execCommand('insertImage', false, e.target.result); reader.readAsDataURL(input.files[0]); } }
+function renderMemos(){ g('memo-list').innerHTML=memos.sort((a,b)=>b.id-a.id).map(m=>`<div class="memo-card"><div class="memo-actions"><button class="btn" onclick="editMemo(${m.id})">편집</button><button class="btn" style="color:red;" onclick="delMemo(${m.id})">삭제</button></div><h4>${m.title}</h4><div style="font-size:14px; margin-top:10px;">${m.content}</div></div>`).join(''); }
+function editMemo(id){ const m = memos.find(x=>x.id===id); g('m-title').value = m.title; g('m-editor').innerHTML = m.content; curMemoEditId = id; g('edit-indicator').style.display='inline'; window.scrollTo({top:0, behavior:'smooth'}); }
+async function delMemo(id){ if(confirm('삭제?')){memos=memos.filter(x=>x.id!==id); renderMemos(); await fetch(`${SB_URL}/rest/v1/memos?id=eq.${id}`,{method:'DELETE',headers:HEADERS});}}
 function moveMonth(v){ calM+=v; if(calM<0){calM=11;calY--;} if(calM>11){calM=0;calY++;} renderCal(); }
 g('tabs').onclick=e=>{ const t=e.target.dataset.tab; if(!t)return; document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on',b.dataset.tab===t)); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+t));};
 
