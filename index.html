@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-<title>Planner Pro v2.9.8</title>
+<title>Planner Pro v3.0.0</title>
 <style>
-/* v2.9.7 스타일 유지 및 일부 보정 */
+/* v2.9.9 스타일 유지 */
 :root { --bg-color: #f5f5f7; --card-color: #ffffff; --text-main: #1d1d1f; --text-sub: #86868b; --accent: #0071e3; --border: #d2d2d7; --radius-m: 12px; --radius-l: 18px; --shadow: 0 8px 24px rgba(0, 0, 0, 0.08); }
 *{box-sizing:border-box;margin:0;padding:0;outline:none;}
 body{font-family:'Pretendard', system-ui, sans-serif;background:var(--bg-color);color:var(--text-main);-webkit-font-smoothing:antialiased;}
@@ -60,7 +60,7 @@ body{font-family:'Pretendard', system-ui, sans-serif;background:var(--bg-color);
 
 <div class="app">
   <div class="app-header">
-    <h1>Planner Pro v2.9.8</h1>
+    <h1>Planner Pro v3.0.0</h1>
     <div id="sync-status" class="sync-badge success" onclick="init()">
       <div class="sync-dot"></div>
       <span id="sync-text">동기화 완료</span>
@@ -143,7 +143,7 @@ async function init(){
     ]);
     const tRes = await tr.json();
     const mRes = await mr.json();
-    todos = tRes.map(r => r.data).filter(t => t && t.text);
+    todos = tRes.map(r => r.data).filter(t => t && t.text).sort((a,b)=>a.order-b.order);
     memos = mRes.map(r => r.data);
     buildPal('main-pal', true); renderAll();
     setSyncStatus('success');
@@ -153,12 +153,17 @@ async function init(){
 async function saveT(singleTodo = null){
   setSyncStatus('loading');
   try {
-    if(singleTodo) {
-        await fetch(SB_URL+'/rest/v1/todos',{method:'POST',headers:{...HEADERS,'Prefer':'resolution=merge-duplicates'},body:JSON.stringify([{id:singleTodo.id, data:singleTodo, updated_at:new Date()}])});
-    } else {
-        const ups=todos.map((t,idx)=>({id:t.id, data:{...t, order:idx}, updated_at:new Date()}));
-        await fetch(SB_URL+'/rest/v1/todos',{method:'POST',headers:{...HEADERS,'Prefer':'resolution=merge-duplicates'},body:JSON.stringify(ups)});
-    }
+    // 1. 전체 리스트의 order를 현재 배열 상태 기준으로 재정립
+    todos.forEach((t, i) => t.order = i);
+    
+    // 2. 전체를 일괄 업데이트 (Supabase upsert)
+    const ups = todos.map(t => ({id: t.id, data: t, updated_at: new Date()}));
+    await fetch(SB_URL+'/rest/v1/todos', {
+      method:'POST',
+      headers:{...HEADERS,'Prefer':'resolution=merge-duplicates'},
+      body:JSON.stringify(ups)
+    });
+    
     renderAll();
     setSyncStatus('success');
   } catch(e) { setSyncStatus('error'); }
@@ -188,11 +193,10 @@ function renderCal(){
     const ds=`${calY}-${String(calM+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`;
     const cell=document.createElement('div'); cell.className='cell'+(ds===selDay?' sel-day':'');
     cell.dataset.date=ds; cell.innerHTML=`<div class="cnum">${i}</div>`;
-    todos.filter(t=>isVisible(t,ds)).sort((a,b)=>a.order-b.order).slice(0,3).forEach(t=>{
+    todos.filter(t=>isVisible(t,ds)).slice(0,3).forEach(t=>{
       const l=document.createElement('div'); l.className='cline'; l.draggable=true;
       l.style=`color:${t.col}; background:${t.col}15; ${t.done?'text-decoration:line-through;opacity:0.5':''}`;
       l.textContent=(t.priority==='1'?'⭐':'')+t.text;
-      // 드래그 시작 시점에 컨트롤 키 상태 체크
       l.onmousedown = (e) => { l.dataset.isCopy = e.ctrlKey || e.metaKey; };
       l.ondragstart = (e) => { e.dataTransfer.setData('tid', t.id); e.dataTransfer.setData('mode', l.dataset.isCopy === 'true' ? 'copy' : 'move'); };
       cell.appendChild(l);
@@ -219,8 +223,9 @@ function renderCal(){
 function renderDayList(){
   g('panel-date').textContent=`📅 ${selDay} 일정`;
   const list=g('day-todo-list'); list.innerHTML='';
-  const dayTodos = todos.filter(t=>isVisible(t, selDay)).sort((a,b)=>a.order-b.order);
-  dayTodos.forEach((t, idx)=>{
+  // 현재 날짜에 보이는 일정들만 필터링 (순서는 이미 정렬되어 있음)
+  const dayTodos = todos.filter(t=>isVisible(t, selDay));
+  dayTodos.forEach((t)=>{
     const item=document.createElement('div'); item.className='titem';
     item.innerHTML=`
       <div class="order-btns">
@@ -236,16 +241,28 @@ function renderDayList(){
   });
 }
 
+// 순서 이동 로직: 전체 배열에서 인덱스를 직접 교체
 function moveOrder(id, dir){
-  const t = todos.find(x => x.id === id);
-  const dayList = todos.filter(x => isVisible(x, t.date)).sort((a,b)=>a.order-b.order);
-  const idx = dayList.findIndex(x => x.id === id);
-  if(dir === -1 && idx > 0) {
-    [dayList[idx].order, dayList[idx-1].order] = [dayList[idx-1].order, dayList[idx].order];
-    saveT();
-  } else if(dir === 1 && idx < dayList.length - 1) {
-    [dayList[idx].order, dayList[idx+1].order] = [dayList[idx+1].order, dayList[idx].order];
-    saveT();
+  // 1. 전체 배열에서의 현재 인덱스 찾기
+  const curIdx = todos.findIndex(x => x.id === id);
+  if(curIdx === -1) return;
+
+  // 2. 같은 날짜를 공유하는 이웃 인덱스 찾기
+  let targetIdx = -1;
+  if(dir === -1) { // 위로 이동
+    for(let i = curIdx - 1; i >= 0; i--) {
+      if(isVisible(todos[i], selDay)) { targetIdx = i; break; }
+    }
+  } else { // 아래로 이동
+    for(let i = curIdx + 1; i < todos.length; i++) {
+      if(isVisible(todos[i], selDay)) { targetIdx = i; break; }
+    }
+  }
+
+  // 3. 찾았다면 배열 내 위치 스왑 후 저장
+  if(targetIdx !== -1) {
+    [todos[curIdx], todos[targetIdx]] = [todos[targetIdx], todos[curIdx]];
+    saveT(); // 일괄 업데이트 호출
   }
 }
 
