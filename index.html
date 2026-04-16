@@ -3,18 +3,21 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-<title>Planner Pro v2.9</title>
+<title>Planner Pro v2.9.8</title>
 <style>
+/* v2.9.7 스타일 유지 및 일부 보정 */
 :root { --bg-color: #f5f5f7; --card-color: #ffffff; --text-main: #1d1d1f; --text-sub: #86868b; --accent: #0071e3; --border: #d2d2d7; --radius-m: 12px; --radius-l: 18px; --shadow: 0 8px 24px rgba(0, 0, 0, 0.08); }
 *{box-sizing:border-box;margin:0;padding:0;outline:none;}
 body{font-family:'Pretendard', system-ui, sans-serif;background:var(--bg-color);color:var(--text-main);-webkit-font-smoothing:antialiased;}
 .app{max-width:960px;margin:0 auto;padding:1.5rem;}
 .app-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;}
-.sync-status{font-size:12px;display:flex;align-items:center;gap:6px;background:#fff;padding:6px 12px;border-radius:20px;box-shadow:var(--shadow); cursor:pointer;}
-.sync-dot{width:8px;height:8px;border-radius:50%;background:#28a745;}
-.sync-dot.saving{background:#ffc107;animation:pulse .8s infinite;}
-.sync-dot.error{background:#ff3b30;}
-@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+.sync-badge { display:flex; align-items:center; gap:8px; padding:8px 16px; border-radius:20px; background:#fff; box-shadow:var(--shadow); font-size:13px; font-weight:600; cursor:pointer; }
+.sync-badge.loading { color: #f39c12; }
+.sync-badge.success { color: #27ae60; }
+.sync-badge.error { color: #e74c3c; }
+.sync-dot { width:8px; height:8px; border-radius:50%; background:currentColor; }
+.sync-dot.blink { animation: blink 0.8s infinite; }
+@keyframes blink { 0% { opacity:1; } 50% { opacity:0.3; } 100% { opacity:1; } }
 .tabs{display:flex;gap:4px;margin-bottom:1.5rem;background:#e3e3e6;padding:4px;border-radius:var(--radius-m);}
 .tab{flex:1;padding:12px;border-radius:10px;border:none;background:transparent;cursor:pointer;font-size:15px;color:var(--text-sub);font-weight:600;}
 .tab.on{background:var(--card-color);color:var(--text-main);box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);}
@@ -33,6 +36,8 @@ body{font-family:'Pretendard', system-ui, sans-serif;background:var(--bg-color);
 .ti{width:100%;padding:14px;border-radius:var(--radius-m);border:1px solid var(--border);font-size:15px;background:#f9f9fb;}
 .opt-bar{display:flex;gap:10px;align-items:center;margin-top:10px;margin-bottom:20px;padding-bottom:15px;border-bottom:1px solid #eee;flex-wrap:wrap;}
 .titem{display:flex;align-items:center;gap:12px;padding:16px;background:#fff;border-radius:var(--radius-m);margin-bottom:10px;border:1px solid #f0f0f2;}
+.order-btns{display:flex; flex-direction:column; gap:2px;}
+.order-btn{padding:2px 6px; font-size:10px; background:#fff; border:1px solid var(--border); border-radius:4px; cursor:pointer;}
 .chk{width:22px;height:22px;border-radius:50%;border:2px solid;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;transition:0.2s; color: transparent;}
 .chk.done{color:white !important; border-color:transparent !important;}
 .editor-wrap{background:#fff; border-radius:var(--radius-l); box-shadow:var(--shadow); overflow:hidden; margin-bottom:20px;}
@@ -46,7 +51,6 @@ body{font-family:'Pretendard', system-ui, sans-serif;background:var(--bg-color);
 .modal{background:#fff;padding:25px;border-radius:var(--radius-l);width:90%;max-width:450px;max-height:90vh;overflow-y:auto;}
 .btn{padding:10px 18px; border-radius:10px; border:1px solid var(--border); background:#fff; cursor:pointer; font-weight:600;}
 .btn.primary{background:var(--accent); color:#fff; border-color:var(--accent);}
-.btn.danger{color:#ff3b30; border-color:#ff3b30;}
 .pal-grid{display:grid;grid-template-columns:repeat(10,1fr);gap:6px;}
 .dot{width:22px;height:22px;border-radius:50%;cursor:pointer;border:2px solid transparent;}
 .dot.on{border-color:#1d1d1f;transform:scale(1.2);}
@@ -56,10 +60,10 @@ body{font-family:'Pretendard', system-ui, sans-serif;background:var(--bg-color);
 
 <div class="app">
   <div class="app-header">
-    <h1>Planner Pro v2.9</h1>
-    <div class="sync-status" onclick="init()" title="강제 동기화">
-      <div class="sync-dot" id="sync-dot"></div>
-      <span id="sync-label">동기화됨</span>
+    <h1>Planner Pro v2.9.8</h1>
+    <div id="sync-status" class="sync-badge success" onclick="init()">
+      <div class="sync-dot"></div>
+      <span id="sync-text">동기화 완료</span>
     </div>
   </div>
 
@@ -107,29 +111,8 @@ body{font-family:'Pretendard', system-ui, sans-serif;background:var(--bg-color);
   </div>
 </div>
 
-<div id="edit-modal" class="overlay">
-  <div class="modal">
-    <h3>일정 상세 수정</h3>
-    <input class="ti" id="edit-ti" style="margin:15px 0;"/>
-    <div style="display:flex; gap:10px; margin-bottom:15px;">
-        <input type="date" class="ti" id="edit-date" style="flex:1;"/>
-        <select class="ti" id="edit-repeat" style="flex:1;">
-            <option value="none">안함</option><option value="daily">매일</option><option value="weekday">평일</option><option value="weekend">주말</option><option value="weekly">매주</option><option value="monthly">매월</option>
-        </select>
-    </div>
-    <div style="margin-bottom:15px;">
-        <select class="ti" id="edit-priority">
-            <option value="0">중요도: 보통</option>
-            <option value="1">중요도: ⭐ 중요</option>
-        </select>
-    </div>
-    <div class="pal-grid" id="edit-pal" style="margin-bottom:20px;"></div>
-    <div style="display:flex; justify-content:flex-end; gap:8px;">
-      <button class="btn" onclick="closeEditModal()">취소</button>
-      <button class="btn primary" id="edit-submit-btn" onclick="submitEdit()">수정 완료</button>
-    </div>
-  </div>
-</div>
+<div id="edit-modal" class="overlay"><div class="modal"><h3>일정 상세 수정</h3><input class="ti" id="edit-ti" style="margin:15px 0;"/><div style="display:flex; gap:10px; margin-bottom:15px;"><input type="date" class="ti" id="edit-date" style="flex:1;"/><select class="ti" id="edit-repeat" style="flex:1;"><option value="none">안함</option><option value="daily">매일</option><option value="weekday">평일</option><option value="weekend">주말</option><option value="weekly">매주</option><option value="monthly">매월</option></select></div><div style="margin-bottom:15px;"><select class="ti" id="edit-priority"><option value="0">중요도: 보통</option><option value="1">중요도: ⭐ 중요</option></select></div><div class="pal-grid" id="edit-pal" style="margin-bottom:20px;"></div><div style="display:flex; justify-content:flex-end; gap:8px;"><button class="btn" onclick="closeEditModal()">취소</button><button class="btn primary" onclick="submitEdit()">수정 완료</button></div></div></div>
+<div id="del-confirm-modal" class="overlay"><div class="modal" style="max-width:350px; text-align:center;"><h3>반복 일정 삭제</h3><p id="del-msg" style="margin:15px 0; font-size:14px; color:var(--text-sub);">삭제 방식을 선택하세요.</p><div style="display:flex; flex-direction:column; gap:10px;"><button class="btn" onclick="executeDelete('single')">이 날짜만 삭제</button><button class="btn danger" style="color:red;" onclick="executeDelete('all')">전체 일정 삭제</button><button class="btn" style="border:none;" onclick="g('del-confirm-modal').classList.remove('on')">취소</button></div></div></div>
 
 <script>
 const SB_URL='https://aphyujajnsbngzsutnwz.supabase.co';
@@ -140,63 +123,49 @@ const COLS=['#ff3b30','#ff9500','#ffcc00','#34c759','#0071e3','#5ac8fa','#af52de
 let todos=[], memos=[], selCol=COLS[4], editCol='', calY=new Date().getFullYear(), calM=new Date().getMonth(), selDay=new Date().toISOString().split('T')[0], curEditId=null, curMemoEditId=null, pendingDelId=null;
 const g=id=>document.getElementById(id);
 
+function setSyncStatus(state) {
+  const badge = g('sync-status');
+  const text = g('sync-text');
+  const dot = badge.querySelector('.sync-dot');
+  badge.className = 'sync-badge ' + state;
+  dot.classList.toggle('blink', state === 'loading');
+  if(state === 'loading') text.textContent = '저장 중...';
+  else if(state === 'success') text.textContent = '동기화 완료';
+  else if(state === 'error') text.textContent = '연결 오류';
+}
+
 async function init(){
-  g('sync-dot').className = 'sync-dot saving';
-  g('sync-label').textContent = '불러오는 중...';
+  setSyncStatus('loading');
   try {
-    const tr=await fetch(`${SB_URL}/rest/v1/todos?select=*`,{headers:HEADERS});
-    const todoData = await tr.json();
-    todos=todoData.map(r=>r.data).filter(t => !t.text.includes("무매 TQQQ"));
-
-    const mr=await fetch(`${SB_URL}/rest/v1/memos?select=*`,{headers:HEADERS});
-    const memoData = await mr.json();
-    memos=memoData.map(r=>r.data);
-
-    buildPal('main-pal', true); renderCal(); renderDayList(); renderMemos();
-    g('sync-dot').className = 'sync-dot';
-    g('sync-label').textContent = '동기화됨';
-  } catch(e) {
-    g('sync-dot').className = 'sync-dot error';
-    g('sync-label').textContent = '연결 오류';
-  }
+    const [tr, mr] = await Promise.all([
+      fetch(SB_URL+'/rest/v1/todos?select=*',{headers:HEADERS}),
+      fetch(SB_URL+'/rest/v1/memos?select=*',{headers:HEADERS})
+    ]);
+    const tRes = await tr.json();
+    const mRes = await mr.json();
+    todos = tRes.map(r => r.data).filter(t => t && t.text);
+    memos = mRes.map(r => r.data);
+    buildPal('main-pal', true); renderAll();
+    setSyncStatus('success');
+  } catch(e) { setSyncStatus('error'); }
 }
 
-// 저장 로직 강화: 모든 데이터 변경 시 이 함수가 끝날 때까지 대기
-async function saveT(){
-  const dot = g('sync-dot');
-  const label = g('sync-label');
-  dot.className = 'sync-dot saving';
-  label.textContent = '저장 중...';
-
+async function saveT(singleTodo = null){
+  setSyncStatus('loading');
   try {
-    const ups = todos.map((t, idx) => ({ id: t.id, data: { ...t, order: idx }, updated_at: new Date().toISOString() }));
-    const response = await fetch(`${SB_URL}/rest/v1/todos`, {
-      method: 'POST',
-      headers: { ...HEADERS, 'Prefer': 'resolution=merge-duplicates' },
-      body: JSON.stringify(ups)
-    });
-    if (!response.ok) throw new Error('Save failed');
-    dot.className = 'sync-dot';
-    label.textContent = '동기화됨';
-    return true;
-  } catch (error) {
-    dot.className = 'sync-dot error';
-    label.textContent = '저장 실패';
-    return false;
-  }
-}
-
-function buildPal(target, isMain){
-  const row=g(target); row.innerHTML='';
-  COLS.forEach(c=>{
-    const d=document.createElement('div');
-    d.className='dot'+((isMain?selCol:editCol)===c?' on':''); d.style.background=c;
-    d.onclick=()=>{if(isMain)selCol=c; else editCol=c; buildPal(target, isMain);};
-    row.appendChild(d);
-  });
+    if(singleTodo) {
+        await fetch(SB_URL+'/rest/v1/todos',{method:'POST',headers:{...HEADERS,'Prefer':'resolution=merge-duplicates'},body:JSON.stringify([{id:singleTodo.id, data:singleTodo, updated_at:new Date()}])});
+    } else {
+        const ups=todos.map((t,idx)=>({id:t.id, data:{...t, order:idx}, updated_at:new Date()}));
+        await fetch(SB_URL+'/rest/v1/todos',{method:'POST',headers:{...HEADERS,'Prefer':'resolution=merge-duplicates'},body:JSON.stringify(ups)});
+    }
+    renderAll();
+    setSyncStatus('success');
+  } catch(e) { setSyncStatus('error'); }
 }
 
 function isVisible(t, ds){
+  if(!t.date) return false;
   if(t.exDates && t.exDates.includes(ds)) return false;
   const target=new Date(ds), origin=new Date(t.date); if(target < origin) return false;
   if(t.date === ds) return true;
@@ -223,21 +192,24 @@ function renderCal(){
       const l=document.createElement('div'); l.className='cline'; l.draggable=true;
       l.style=`color:${t.col}; background:${t.col}15; ${t.done?'text-decoration:line-through;opacity:0.5':''}`;
       l.textContent=(t.priority==='1'?'⭐':'')+t.text;
-      l.onmousedown = (e) => { l.dataset.isCtrl = e.ctrlKey; };
-      l.ondragstart = (e) => { e.dataTransfer.setData('tid', t.id); e.dataTransfer.setData('isCtrl', l.dataset.isCtrl); };
+      // 드래그 시작 시점에 컨트롤 키 상태 체크
+      l.onmousedown = (e) => { l.dataset.isCopy = e.ctrlKey || e.metaKey; };
+      l.ondragstart = (e) => { e.dataTransfer.setData('tid', t.id); e.dataTransfer.setData('mode', l.dataset.isCopy === 'true' ? 'copy' : 'move'); };
       cell.appendChild(l);
     });
     cell.ondragover=e=>e.preventDefault();
     cell.ondrop=async e=>{
-        e.preventDefault();
-        const tid=parseInt(e.dataTransfer.getData('tid'));
-        const isCtrl=e.dataTransfer.getData('isCtrl')==='true';
-        const t=todos.find(x=>x.id===tid);
-        if(t){
-            if(isCtrl){ todos.push({...t, id:Date.now(), date:cell.dataset.date, order:todos.length, exDates:[]}); }
-            else { t.date=cell.dataset.date; if(t.exDates) t.exDates=[]; }
-            await saveT(); renderCal(); renderDayList();
+      e.preventDefault();
+      const tid=parseInt(e.dataTransfer.getData('tid')), mode=e.dataTransfer.getData('mode');
+      const t=todos.find(x=>x.id===tid);
+      if(t){
+        if(mode === 'copy') {
+          const newT = {...t, id:Date.now(), date:cell.dataset.date, order:todos.length, exDates:[]};
+          todos.push(newT); saveT(newT);
+        } else {
+          t.date=cell.dataset.date; if(t.exDates) t.exDates=[]; saveT(t);
         }
+      }
     };
     cell.onclick=()=>{selDay=ds; renderCal(); renderDayList();};
     grid.appendChild(cell);
@@ -247,12 +219,16 @@ function renderCal(){
 function renderDayList(){
   g('panel-date').textContent=`📅 ${selDay} 일정`;
   const list=g('day-todo-list'); list.innerHTML='';
-  todos.filter(t=>isVisible(t, selDay)).sort((a,b)=>a.order-b.order).forEach(t=>{
+  const dayTodos = todos.filter(t=>isVisible(t, selDay)).sort((a,b)=>a.order-b.order);
+  dayTodos.forEach((t, idx)=>{
     const item=document.createElement('div'); item.className='titem';
     item.innerHTML=`
-      <div style="display:flex; flex-direction:column; gap:2px;"><button class="btn" style="padding:2px 6px; font-size:10px;" onclick="moveOrder(${t.id},'up')">▲</button><button class="btn" style="padding:2px 6px; font-size:10px;" onclick="moveOrder(${t.id},'down')">▼</button></div>
+      <div class="order-btns">
+        <button class="order-btn" onclick="moveOrder(${t.id}, -1)">▲</button>
+        <button class="order-btn" onclick="moveOrder(${t.id}, 1)">▼</button>
+      </div>
       <div class="chk ${t.done?'done':''}" style="border-color:${t.col}; background:${t.done?t.col:'transparent'}" onclick="toggleT(${t.id})">✔</div>
-      <div style="flex:1; font-size:15px; ${t.done?'text-decoration:line-through;color:#aaa':''}">${t.text} ${t.repeat!=='none'?'<small style="color:#0071e3">['+t.repeat+']</small>':''}</div>
+      <div style="flex:1; font-size:15px; ${t.done?'text-decoration:line-through;color:#aaa':''}">${t.text}</div>
       <button class="btn" style="padding:6px 10px; font-size:12px;" onclick="openEdit(${t.id})">수정</button>
       <button class="btn" style="padding:6px 10px; font-size:12px; color:#ff3b30;" onclick="handleDelete(${t.id})">삭제</button>
     `;
@@ -260,91 +236,36 @@ function renderDayList(){
   });
 }
 
-async function handleDelete(id){
-    const t = todos.find(x=>x.id===id);
-    if(t.repeat && t.repeat !== 'none'){ pendingDelId = id; g('del-confirm-modal').classList.add('on'); }
-    else { if(confirm('삭제하시겠습니까?')){ todos=todos.filter(x=>x.id!==id); await saveT(); renderCal(); renderDayList(); } }
-}
-
-async function executeDelete(type){
-    const t = todos.find(x=>x.id===pendingDelId);
-    if(!t) return;
-    if(type === 'all'){ todos = todos.filter(x=>x.id!==pendingDelId); }
-    else { if(!t.exDates) t.exDates = []; t.exDates.push(selDay); }
-    g('del-confirm-modal').classList.remove('on'); 
-    await saveT(); renderCal(); renderDayList();
-}
-
-async function toggleT(id){ 
-  const t=todos.find(x=>x.id===id); 
-  t.done=!t.done; 
-  await saveT(); 
-  renderCal(); 
-  renderDayList(); 
-}
-
-// 메모 저장 로직도 비동기 대기 추가
-g('m-save').onclick=async()=>{
-  const title = g('m-title').value; const content = g('m-editor').innerHTML; if(!title) return;
-  if(curMemoEditId){
-    const m = memos.find(x=>x.id===curMemoEditId); m.title = title; m.content = content; curMemoEditId = null; g('edit-indicator').style.display='none';
-  } else { memos.push({id:Date.now(), title, content, ts:new Date().toLocaleString()}); }
-  
-  g('sync-dot').className = 'sync-dot saving';
-  const res = await fetch(`${SB_URL}/rest/v1/memos`,{method:'POST',headers:{...HEADERS,'Prefer':'resolution=merge-duplicates'},body:JSON.stringify(memos.map(m=>({id:m.id, data:m}))) });
-  if(res.ok) {
-    g('sync-dot').className = 'sync-dot';
-    renderMemos(); g('m-title').value=''; g('m-editor').innerHTML='';
+function moveOrder(id, dir){
+  const t = todos.find(x => x.id === id);
+  const dayList = todos.filter(x => isVisible(x, t.date)).sort((a,b)=>a.order-b.order);
+  const idx = dayList.findIndex(x => x.id === id);
+  if(dir === -1 && idx > 0) {
+    [dayList[idx].order, dayList[idx-1].order] = [dayList[idx-1].order, dayList[idx].order];
+    saveT();
+  } else if(dir === 1 && idx < dayList.length - 1) {
+    [dayList[idx].order, dayList[idx+1].order] = [dayList[idx+1].order, dayList[idx].order];
+    saveT();
   }
-};
-
-function openEdit(id){ 
-    const t=todos.find(x=>x.id===id); curEditId=id; editCol=t.col; 
-    g('edit-ti').value=t.text; g('edit-date').value=t.date; g('edit-repeat').value=t.repeat||'none'; g('edit-priority').value=t.priority || '0'; 
-    buildPal('edit-pal', false); g('edit-modal').classList.add('on'); 
 }
 
-async function submitEdit(){ 
-    const btn = g('edit-submit-btn');
-    btn.disabled = true; btn.textContent = '저장 중...';
-    
-    const t=todos.find(x=>x.id===curEditId); 
-    t.text=g('edit-ti').value; t.date=g('edit-date').value; t.repeat=g('edit-repeat').value; t.priority=g('edit-priority').value; t.col=editCol; 
-    
-    const success = await saveT();
-    if(success) {
-      g('edit-modal').classList.remove('on'); 
-      renderCal(); renderDayList(); 
-    } else {
-      alert('저장에 실패했습니다. 다시 시도해 주세요.');
-    }
-    btn.disabled = false; btn.textContent = '수정 완료';
-}
-
-async function moveOrder(id, dir){
-  const t = todos.find(x => x.id === id); const same = todos.filter(x => isVisible(x, t.date)).sort((a,b)=>a.order-b.order); const idx = same.findIndex(x => x.id === id);
-  if(dir==='up' && idx>0){ [same[idx].order, same[idx-1].order] = [same[idx-1].order, same[idx].order]; }
-  else if(dir==='down' && idx<same.length-1){ [same[idx].order, same[idx+1].order] = [same[idx+1].order, same[idx].order]; }
-  await saveT(); renderDayList();
-}
-
-g('t-add').onclick=async()=>{
-  const val=g('t-inp').value.trim(); if(!val) return;
-  todos.push({id:Date.now(), text:val, date:selDay, col:selCol, done:false, priority:g('t-priority').value, repeat:g('t-repeat').value, order:todos.length, exDates:[]});
-  const success = await saveT();
-  if(success) { g('t-inp').value=''; renderCal(); renderDayList(); }
-};
-
-// ... (나머지 헬퍼 함수들은 동일)
-function closeEditModal(){ g('edit-modal').classList.remove('on'); }
+function renderAll(){ renderCal(); renderDayList(); renderMemos(); }
+function buildPal(target, isMain){ const row=g(target); row.innerHTML=''; COLS.forEach(c=>{ const d=document.createElement('div'); d.className='dot'+((isMain?selCol:editCol)===c?' on':''); d.style.background=c; d.onclick=()=>{if(isMain)selCol=c; else editCol=c; buildPal(target, isMain);}; row.appendChild(d); }); }
+function toggleT(id){ const t=todos.find(x=>x.id===id); t.done=!t.done; saveT(t); }
+function handleDelete(id){ const t=todos.find(x=>x.id===id); if(t.repeat&&t.repeat!=='none'){pendingDelId=id;g('del-confirm-modal').classList.add('on');}else{if(confirm('삭제?')){setSyncStatus('loading');fetch(`${SB_URL}/rest/v1/todos?id=eq.${id}`,{method:'DELETE',headers:HEADERS}).then(()=>{todos=todos.filter(x=>x.id!==id);renderAll();setSyncStatus('success');});}}}
+async function executeDelete(type){ const targetId=pendingDelId; setSyncStatus('loading'); if(type==='all'){await fetch(`${SB_URL}/rest/v1/todos?id=eq.${targetId}`,{method:'DELETE',headers:HEADERS});todos=todos.filter(x=>x.id!==targetId);}else{const t=todos.find(x=>x.id===targetId);if(!t.exDates)t.exDates=[];t.exDates.push(selDay);await saveT(t);}g('del-confirm-modal').classList.remove('on');renderAll();setSyncStatus('success');}
 function exec(cmd, val=null){ document.execCommand(cmd, false, val); g('m-editor').focus(); }
 function handleImg(input){ if(input.files && input.files[0]){ const reader=new FileReader(); reader.onload=e=>document.execCommand('insertImage', false, e.target.result); reader.readAsDataURL(input.files[0]); } }
+g('m-save').onclick=async()=>{ const title=g('m-title').value, content=g('m-editor').innerHTML; if(!title)return; setSyncStatus('loading'); if(curMemoEditId){const m=memos.find(x=>x.id===curMemoEditId);m.title=title;m.content=content;curMemoEditId=null;g('edit-indicator').style.display='none';}else{memos.push({id:Date.now(),title,content,ts:new Date().toLocaleString()});}renderMemos();g('m-title').value='';g('m-editor').innerHTML='';await fetch(SB_URL+'/rest/v1/memos',{method:'POST',headers:{...HEADERS,'Prefer':'resolution=merge-duplicates'},body:JSON.stringify(memos.map(m=>({id:m.id,data:m}))) });setSyncStatus('success');};
 function renderMemos(){ g('memo-list').innerHTML=memos.sort((a,b)=>b.id-a.id).map(m=>`<div class="memo-card"><div class="memo-actions"><button class="btn" onclick="editMemo(${m.id})">편집</button><button class="btn" style="color:red;" onclick="delMemo(${m.id})">삭제</button></div><h4>${m.title}</h4><div style="font-size:14px; margin-top:10px;">${m.content}</div></div>`).join(''); }
-function editMemo(id){ const m = memos.find(x=>x.id===id); g('m-title').value = m.title; g('m-editor').innerHTML = m.content; curMemoEditId = id; g('edit-indicator').style.display='inline'; window.scrollTo({top:0, behavior:'smooth'}); }
-async function delMemo(id){ if(confirm('삭제?')){memos=memos.filter(x=>x.id!==id); renderMemos(); await fetch(`${SB_URL}/rest/v1/memos?id=eq.${id}`,{method:'DELETE',headers:HEADERS});}}
+function editMemo(id){ const m=memos.find(x=>x.id===id);g('m-title').value=m.title;g('m-editor').innerHTML=m.content;curMemoEditId=id;g('edit-indicator').style.display='inline';window.scrollTo({top:0,behavior:'smooth'});}
+async function delMemo(id){ if(confirm('삭제?')){setSyncStatus('loading');await fetch(`${SB_URL}/rest/v1/memos?id=eq.${id}`,{method:'DELETE',headers:HEADERS});memos=memos.filter(x=>x.id!==id);renderMemos();setSyncStatus('success');}}
+function openEdit(id){ const t=todos.find(x=>x.id===id);curEditId=id;editCol=t.col;g('edit-ti').value=t.text;g('edit-date').value=t.date;g('edit-repeat').value=t.repeat||'none';g('edit-priority').value=t.priority||'0';buildPal('edit-pal',false);g('edit-modal').classList.add('on');}
+function submitEdit(){ const t=todos.find(x=>x.id===curEditId);t.text=g('edit-ti').value;t.date=g('edit-date').value;t.repeat=g('edit-repeat').value;t.priority=g('edit-priority').value;t.col=editCol;g('edit-modal').classList.remove('on');saveT(t);}
+function closeEditModal(){ g('edit-modal').classList.remove('on'); }
+g('t-add').onclick=async()=>{ const val=g('t-inp').value.trim(); if(!val) return; const newT={id:Date.now(),text:val,date:selDay,col:selCol,done:false,priority:g('t-priority').value,repeat:g('t-repeat').value,order:todos.length,exDates:[]}; todos.push(newT); g('t-inp').value=''; saveT(newT); };
 function moveMonth(v){ calM+=v; if(calM<0){calM=11;calY--;} if(calM>11){calM=0;calY++;} renderCal(); }
 g('tabs').onclick=e=>{ const t=e.target.dataset.tab; if(!t)return; document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on',b.dataset.tab===t)); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+t));};
-
 init();
 </script>
 </body>
