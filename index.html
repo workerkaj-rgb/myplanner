@@ -3,9 +3,8 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-<title>Planner Pro v3.0.0</title>
+<title>Planner Pro v3.0.1</title>
 <style>
-/* v2.9.9 스타일 유지 */
 :root { --bg-color: #f5f5f7; --card-color: #ffffff; --text-main: #1d1d1f; --text-sub: #86868b; --accent: #0071e3; --border: #d2d2d7; --radius-m: 12px; --radius-l: 18px; --shadow: 0 8px 24px rgba(0, 0, 0, 0.08); }
 *{box-sizing:border-box;margin:0;padding:0;outline:none;}
 body{font-family:'Pretendard', system-ui, sans-serif;background:var(--bg-color);color:var(--text-main);-webkit-font-smoothing:antialiased;}
@@ -60,7 +59,7 @@ body{font-family:'Pretendard', system-ui, sans-serif;background:var(--bg-color);
 
 <div class="app">
   <div class="app-header">
-    <h1>Planner Pro v3.0.0</h1>
+    <h1>Planner Pro v3.0.1</h1>
     <div id="sync-status" class="sync-badge success" onclick="init()">
       <div class="sync-dot"></div>
       <span id="sync-text">동기화 완료</span>
@@ -150,23 +149,26 @@ async function init(){
   } catch(e) { setSyncStatus('error'); }
 }
 
-async function saveT(singleTodo = null){
+async function saveT(){
   setSyncStatus('loading');
   try {
-    // 1. 전체 리스트의 order를 현재 배열 상태 기준으로 재정립
+    // 배열 순서대로 order 재부여
     todos.forEach((t, i) => t.order = i);
-    
-    // 2. 전체를 일괄 업데이트 (Supabase upsert)
     const ups = todos.map(t => ({id: t.id, data: t, updated_at: new Date()}));
     await fetch(SB_URL+'/rest/v1/todos', {
       method:'POST',
       headers:{...HEADERS,'Prefer':'resolution=merge-duplicates'},
       body:JSON.stringify(ups)
     });
-    
     renderAll();
     setSyncStatus('success');
   } catch(e) { setSyncStatus('error'); }
+}
+
+// 개별 완료 판단 함수
+function isDone(t, ds) {
+  if (!t.repeat || t.repeat === 'none') return t.done;
+  return t.doneDates && t.doneDates.includes(ds);
 }
 
 function isVisible(t, ds){
@@ -195,7 +197,8 @@ function renderCal(){
     cell.dataset.date=ds; cell.innerHTML=`<div class="cnum">${i}</div>`;
     todos.filter(t=>isVisible(t,ds)).slice(0,3).forEach(t=>{
       const l=document.createElement('div'); l.className='cline'; l.draggable=true;
-      l.style=`color:${t.col}; background:${t.col}15; ${t.done?'text-decoration:line-through;opacity:0.5':''}`;
+      const done = isDone(t, ds);
+      l.style=`color:${t.col}; background:${t.col}15; ${done?'text-decoration:line-through;opacity:0.5':''}`;
       l.textContent=(t.priority==='1'?'⭐':'')+t.text;
       l.onmousedown = (e) => { l.dataset.isCopy = e.ctrlKey || e.metaKey; };
       l.ondragstart = (e) => { e.dataTransfer.setData('tid', t.id); e.dataTransfer.setData('mode', l.dataset.isCopy === 'true' ? 'copy' : 'move'); };
@@ -208,10 +211,10 @@ function renderCal(){
       const t=todos.find(x=>x.id===tid);
       if(t){
         if(mode === 'copy') {
-          const newT = {...t, id:Date.now(), date:cell.dataset.date, order:todos.length, exDates:[]};
-          todos.push(newT); saveT(newT);
+          const newT = {...t, id:Date.now(), date:cell.dataset.date, order:todos.length, exDates:[], doneDates:[]};
+          todos.push(newT); saveT();
         } else {
-          t.date=cell.dataset.date; if(t.exDates) t.exDates=[]; saveT(t);
+          t.date=cell.dataset.date; if(t.exDates) t.exDates=[]; saveT();
         }
       }
     };
@@ -223,17 +226,17 @@ function renderCal(){
 function renderDayList(){
   g('panel-date').textContent=`📅 ${selDay} 일정`;
   const list=g('day-todo-list'); list.innerHTML='';
-  // 현재 날짜에 보이는 일정들만 필터링 (순서는 이미 정렬되어 있음)
   const dayTodos = todos.filter(t=>isVisible(t, selDay));
   dayTodos.forEach((t)=>{
     const item=document.createElement('div'); item.className='titem';
+    const done = isDone(t, selDay);
     item.innerHTML=`
       <div class="order-btns">
         <button class="order-btn" onclick="moveOrder(${t.id}, -1)">▲</button>
         <button class="order-btn" onclick="moveOrder(${t.id}, 1)">▼</button>
       </div>
-      <div class="chk ${t.done?'done':''}" style="border-color:${t.col}; background:${t.done?t.col:'transparent'}" onclick="toggleT(${t.id})">✔</div>
-      <div style="flex:1; font-size:15px; ${t.done?'text-decoration:line-through;color:#aaa':''}">${t.text}</div>
+      <div class="chk ${done?'done':''}" style="border-color:${t.col}; background:${done?t.col:'transparent'}" onclick="toggleT(${t.id}, '${selDay}')">✔</div>
+      <div style="flex:1; font-size:15px; ${done?'text-decoration:line-through;color:#aaa':''}">${t.text}</div>
       <button class="btn" style="padding:6px 10px; font-size:12px;" onclick="openEdit(${t.id})">수정</button>
       <button class="btn" style="padding:6px 10px; font-size:12px; color:#ff3b30;" onclick="handleDelete(${t.id})">삭제</button>
     `;
@@ -241,36 +244,38 @@ function renderDayList(){
   });
 }
 
-// 순서 이동 로직: 전체 배열에서 인덱스를 직접 교체
+function toggleT(id, dateStr){
+  const t=todos.find(x=>x.id===id);
+  if(!t.repeat || t.repeat === 'none') {
+    t.done = !t.done;
+  } else {
+    if(!t.doneDates) t.doneDates = [];
+    const idx = t.doneDates.indexOf(dateStr);
+    if(idx > -1) t.doneDates.splice(idx, 1);
+    else t.doneDates.push(dateStr);
+  }
+  saveT();
+}
+
 function moveOrder(id, dir){
-  // 1. 전체 배열에서의 현재 인덱스 찾기
   const curIdx = todos.findIndex(x => x.id === id);
   if(curIdx === -1) return;
-
-  // 2. 같은 날짜를 공유하는 이웃 인덱스 찾기
   let targetIdx = -1;
-  if(dir === -1) { // 위로 이동
-    for(let i = curIdx - 1; i >= 0; i--) {
-      if(isVisible(todos[i], selDay)) { targetIdx = i; break; }
-    }
-  } else { // 아래로 이동
-    for(let i = curIdx + 1; i < todos.length; i++) {
-      if(isVisible(todos[i], selDay)) { targetIdx = i; break; }
-    }
+  if(dir === -1) {
+    for(let i = curIdx - 1; i >= 0; i--) { if(isVisible(todos[i], selDay)) { targetIdx = i; break; } }
+  } else {
+    for(let i = curIdx + 1; i < todos.length; i++) { if(isVisible(todos[i], selDay)) { targetIdx = i; break; } }
   }
-
-  // 3. 찾았다면 배열 내 위치 스왑 후 저장
   if(targetIdx !== -1) {
     [todos[curIdx], todos[targetIdx]] = [todos[targetIdx], todos[curIdx]];
-    saveT(); // 일괄 업데이트 호출
+    saveT();
   }
 }
 
 function renderAll(){ renderCal(); renderDayList(); renderMemos(); }
 function buildPal(target, isMain){ const row=g(target); row.innerHTML=''; COLS.forEach(c=>{ const d=document.createElement('div'); d.className='dot'+((isMain?selCol:editCol)===c?' on':''); d.style.background=c; d.onclick=()=>{if(isMain)selCol=c; else editCol=c; buildPal(target, isMain);}; row.appendChild(d); }); }
-function toggleT(id){ const t=todos.find(x=>x.id===id); t.done=!t.done; saveT(t); }
 function handleDelete(id){ const t=todos.find(x=>x.id===id); if(t.repeat&&t.repeat!=='none'){pendingDelId=id;g('del-confirm-modal').classList.add('on');}else{if(confirm('삭제?')){setSyncStatus('loading');fetch(`${SB_URL}/rest/v1/todos?id=eq.${id}`,{method:'DELETE',headers:HEADERS}).then(()=>{todos=todos.filter(x=>x.id!==id);renderAll();setSyncStatus('success');});}}}
-async function executeDelete(type){ const targetId=pendingDelId; setSyncStatus('loading'); if(type==='all'){await fetch(`${SB_URL}/rest/v1/todos?id=eq.${targetId}`,{method:'DELETE',headers:HEADERS});todos=todos.filter(x=>x.id!==targetId);}else{const t=todos.find(x=>x.id===targetId);if(!t.exDates)t.exDates=[];t.exDates.push(selDay);await saveT(t);}g('del-confirm-modal').classList.remove('on');renderAll();setSyncStatus('success');}
+async function executeDelete(type){ const targetId=pendingDelId; setSyncStatus('loading'); if(type==='all'){await fetch(`${SB_URL}/rest/v1/todos?id=eq.${targetId}`,{method:'DELETE',headers:HEADERS});todos=todos.filter(x=>x.id!==targetId);}else{const t=todos.find(x=>x.id===targetId);if(!t.exDates)t.exDates=[];t.exDates.push(selDay);await saveT();}g('del-confirm-modal').classList.remove('on');renderAll();setSyncStatus('success');}
 function exec(cmd, val=null){ document.execCommand(cmd, false, val); g('m-editor').focus(); }
 function handleImg(input){ if(input.files && input.files[0]){ const reader=new FileReader(); reader.onload=e=>document.execCommand('insertImage', false, e.target.result); reader.readAsDataURL(input.files[0]); } }
 g('m-save').onclick=async()=>{ const title=g('m-title').value, content=g('m-editor').innerHTML; if(!title)return; setSyncStatus('loading'); if(curMemoEditId){const m=memos.find(x=>x.id===curMemoEditId);m.title=title;m.content=content;curMemoEditId=null;g('edit-indicator').style.display='none';}else{memos.push({id:Date.now(),title,content,ts:new Date().toLocaleString()});}renderMemos();g('m-title').value='';g('m-editor').innerHTML='';await fetch(SB_URL+'/rest/v1/memos',{method:'POST',headers:{...HEADERS,'Prefer':'resolution=merge-duplicates'},body:JSON.stringify(memos.map(m=>({id:m.id,data:m}))) });setSyncStatus('success');};
@@ -278,9 +283,9 @@ function renderMemos(){ g('memo-list').innerHTML=memos.sort((a,b)=>b.id-a.id).ma
 function editMemo(id){ const m=memos.find(x=>x.id===id);g('m-title').value=m.title;g('m-editor').innerHTML=m.content;curMemoEditId=id;g('edit-indicator').style.display='inline';window.scrollTo({top:0,behavior:'smooth'});}
 async function delMemo(id){ if(confirm('삭제?')){setSyncStatus('loading');await fetch(`${SB_URL}/rest/v1/memos?id=eq.${id}`,{method:'DELETE',headers:HEADERS});memos=memos.filter(x=>x.id!==id);renderMemos();setSyncStatus('success');}}
 function openEdit(id){ const t=todos.find(x=>x.id===id);curEditId=id;editCol=t.col;g('edit-ti').value=t.text;g('edit-date').value=t.date;g('edit-repeat').value=t.repeat||'none';g('edit-priority').value=t.priority||'0';buildPal('edit-pal',false);g('edit-modal').classList.add('on');}
-function submitEdit(){ const t=todos.find(x=>x.id===curEditId);t.text=g('edit-ti').value;t.date=g('edit-date').value;t.repeat=g('edit-repeat').value;t.priority=g('edit-priority').value;t.col=editCol;g('edit-modal').classList.remove('on');saveT(t);}
+function submitEdit(){ const t=todos.find(x=>x.id===curEditId);t.text=g('edit-ti').value;t.date=g('edit-date').value;t.repeat=g('edit-repeat').value;t.priority=g('edit-priority').value;t.col=editCol;g('edit-modal').classList.remove('on');saveT();}
 function closeEditModal(){ g('edit-modal').classList.remove('on'); }
-g('t-add').onclick=async()=>{ const val=g('t-inp').value.trim(); if(!val) return; const newT={id:Date.now(),text:val,date:selDay,col:selCol,done:false,priority:g('t-priority').value,repeat:g('t-repeat').value,order:todos.length,exDates:[]}; todos.push(newT); g('t-inp').value=''; saveT(newT); };
+g('t-add').onclick=async()=>{ const val=g('t-inp').value.trim(); if(!val) return; const newT={id:Date.now(),text:val,date:selDay,col:selCol,done:false,priority:g('t-priority').value,repeat:g('t-repeat').value,order:todos.length,exDates:[],doneDates:[]}; todos.push(newT); g('t-inp').value=''; saveT(); };
 function moveMonth(v){ calM+=v; if(calM<0){calM=11;calY--;} if(calM>11){calM=0;calY++;} renderCal(); }
 g('tabs').onclick=e=>{ const t=e.target.dataset.tab; if(!t)return; document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on',b.dataset.tab===t)); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+t));};
 init();
