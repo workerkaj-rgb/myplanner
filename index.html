@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-<title>Planner Pro v3.0.1</title>
+<title>Planner Pro v3.0.3 - Memory Patch</title>
 <style>
-:root { --bg-color: #f5f5f7; --card-color: #ffffff; --text-main: #1d1d1f; --text-sub: #86868b; --accent: #0071e3; --border: #d2d2d7; --radius-m: 12px; --radius-l: 18px; --shadow: 0 8px 24px rgba(0, 0, 0, 0.08); }
+:root { --bg-color: #f5f5f7; --card-color: #ffffff; --text-main: #1d1d1f; --text-sub: #86868b; --accent: #0071e3; --border: #d2d2d7; --radius-m: 12px; --radius-l: 18px; --shadow: 0 8px 24px rgba(0, 0, 0, 0.08); --red: #ff3b30; --blue: #0071e3; }
 *{box-sizing:border-box;margin:0;padding:0;outline:none;}
 body{font-family:'Pretendard', system-ui, sans-serif;background:var(--bg-color);color:var(--text-main);-webkit-font-smoothing:antialiased;}
 .app{max-width:960px;margin:0 auto;padding:1.5rem;}
@@ -25,11 +25,14 @@ body{font-family:'Pretendard', system-ui, sans-serif;background:var(--bg-color);
 .cal-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;font-size:18px;font-weight:700;padding:0 10px;}
 .cgrid{display:grid;grid-template-columns:repeat(7, minmax(0, 1fr)); gap:4px; min-width: 700px;}
 .dlbl{text-align:center;font-size:12px;color:var(--text-sub);padding-bottom:10px;font-weight:600;}
-.dlbl:first-child { color: #ff3b30; } 
-.dlbl:last-child { color: #0071e3; }
+.dlbl:first-child { color: var(--red); } 
+.dlbl:last-child { color: var(--blue); }
 .cell{border-radius:8px;background:#fbfbfd;cursor:pointer;min-height:100px;border:1px solid #f0f0f2;transition:0.2s;display:flex;flex-direction:column;position:relative;}
 .cell.sel-day{background:#fff;border-color:var(--accent);box-shadow: 0 0 0 2px var(--accent) inset;}
-.cnum{padding:6px 8px;font-size:13px;color:var(--text-sub);font-weight:500;}
+.cnum{padding:6px 8px;font-size:13px;color:var(--text-sub);font-weight:600;}
+.cell.sun .cnum, .cell.holiday .cnum { color: var(--red) !important; }
+.cell.sat .cnum { color: var(--blue); }
+.h-name{font-size:10px; color:var(--red); margin-left:4px; font-weight:normal;}
 .cline{font-size:10px;padding:3px 6px;margin:1px 3px;border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:grab;font-weight:500;}
 .day-panel{background:var(--card-color);border-radius:var(--radius-l);padding:24px;box-shadow:var(--shadow);border:1px solid var(--border);}
 .ti{width:100%;padding:14px;border-radius:var(--radius-m);border:1px solid var(--border);font-size:15px;background:#f9f9fb;}
@@ -59,7 +62,7 @@ body{font-family:'Pretendard', system-ui, sans-serif;background:var(--bg-color);
 
 <div class="app">
   <div class="app-header">
-    <h1>Planner Pro v3.0.1</h1>
+    <h1>Planner Pro v3.0.3</h1>
     <div id="sync-status" class="sync-badge success" onclick="init()">
       <div class="sync-dot"></div>
       <span id="sync-text">동기화 완료</span>
@@ -122,15 +125,46 @@ const COLS=['#ff3b30','#ff9500','#ffcc00','#34c759','#0071e3','#5ac8fa','#af52de
 let todos=[], memos=[], selCol=COLS[4], editCol='', calY=new Date().getFullYear(), calM=new Date().getMonth(), selDay=new Date().toISOString().split('T')[0], curEditId=null, curMemoEditId=null, pendingDelId=null;
 const g=id=>document.getElementById(id);
 
+const LUNAR = { 2026: {"02-16":"설날","02-17":"설날","02-18":"설날","05-24":"부처님오신날","09-24":"추석","09-25":"추석","09-26":"추석"}, 2027: {"02-06":"설날","02-07":"설날","02-08":"설날","05-13":"부처님오신날","09-14":"추석","09-15":"추석","09-16":"추석"}};
+function getHolidays(y) {
+  const h = {}; const solar = {"01-01":"신정","03-01":"삼일절","05-05":"어린이날","06-06":"현충일","08-15":"광복절","10-03":"개천절","10-09":"한글날","12-25":"성탄절"};
+  for(let md in solar) h[`${y}-${md}`] = solar[md];
+  if(LUNAR[y]) for(let md in LUNAR[y]) h[`${y}-${md}`] = LUNAR[y][md];
+  const res = {...h};
+  for(let ds in h) {
+    const d = new Date(ds); if(["삼일절","광복절","개천절","한글날","어린이날","부처님오신날","성탄절"].includes(h[ds]) && (d.getDay()===0 || d.getDay()===6)) {
+      let n = new Date(d); do { n.setDate(n.getDate()+1); } while(n.getDay()===0 || n.getDay()===6);
+      res[`${y}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`] = "대체공휴일";
+    }
+  }
+  return res;
+}
+
 function setSyncStatus(state) {
-  const badge = g('sync-status');
-  const text = g('sync-text');
-  const dot = badge.querySelector('.sync-dot');
+  const badge = g('sync-status'); const text = g('sync-text'); const dot = badge.querySelector('.sync-dot');
   badge.className = 'sync-badge ' + state;
   dot.classList.toggle('blink', state === 'loading');
   if(state === 'loading') text.textContent = '저장 중...';
   else if(state === 'success') text.textContent = '동기화 완료';
   else if(state === 'error') text.textContent = '연결 오류';
+}
+
+async function forceSyncAll() {
+  setSyncStatus('loading');
+  try {
+    // 1. 기존 데이터 초기화 (완전 삭제 후 재업로드로 정합성 확보)
+    await Promise.all([
+      fetch(SB_URL+'/rest/v1/todos?id=gt.0', { method:'DELETE', headers:HEADERS }),
+      fetch(SB_URL+'/rest/v1/memos?id=gt.0', { method:'DELETE', headers:HEADERS })
+    ]);
+    // 2. 현재 상태 재업로드
+    const tUps = todos.map((t, i) => ({ id: t.id || Date.now()+i, data: {...t, order: i} }));
+    const mUps = memos.map((m, i) => ({ id: m.id || Date.now()+2000+i, data: m }));
+    if(tUps.length > 0) await fetch(SB_URL+'/rest/v1/todos', { method:'POST', headers:HEADERS, body:JSON.stringify(tUps) });
+    if(mUps.length > 0) await fetch(SB_URL+'/rest/v1/memos', { method:'POST', headers:HEADERS, body:JSON.stringify(mUps) });
+    renderAll();
+    setSyncStatus('success');
+  } catch(e) { setSyncStatus('error'); }
 }
 
 async function init(){
@@ -140,40 +174,16 @@ async function init(){
       fetch(SB_URL+'/rest/v1/todos?select=*',{headers:HEADERS}),
       fetch(SB_URL+'/rest/v1/memos?select=*',{headers:HEADERS})
     ]);
-    const tRes = await tr.json();
-    const mRes = await mr.json();
-    todos = tRes.map(r => r.data).filter(t => t && t.text).sort((a,b)=>a.order-b.order);
-    memos = mRes.map(r => r.data);
+    todos = (await tr.json()).map(r => r.data).filter(t => t && t.text).sort((a,b)=>a.order-b.order);
+    memos = (await mr.json()).map(r => r.data);
     buildPal('main-pal', true); renderAll();
     setSyncStatus('success');
   } catch(e) { setSyncStatus('error'); }
 }
 
-async function saveT(){
-  setSyncStatus('loading');
-  try {
-    // 배열 순서대로 order 재부여
-    todos.forEach((t, i) => t.order = i);
-    const ups = todos.map(t => ({id: t.id, data: t, updated_at: new Date()}));
-    await fetch(SB_URL+'/rest/v1/todos', {
-      method:'POST',
-      headers:{...HEADERS,'Prefer':'resolution=merge-duplicates'},
-      body:JSON.stringify(ups)
-    });
-    renderAll();
-    setSyncStatus('success');
-  } catch(e) { setSyncStatus('error'); }
-}
-
-// 개별 완료 판단 함수
-function isDone(t, ds) {
-  if (!t.repeat || t.repeat === 'none') return t.done;
-  return t.doneDates && t.doneDates.includes(ds);
-}
-
+function isDone(t, ds) { return (!t.repeat || t.repeat === 'none') ? t.done : (t.doneDates && t.doneDates.includes(ds)); }
 function isVisible(t, ds){
-  if(!t.date) return false;
-  if(t.exDates && t.exDates.includes(ds)) return false;
+  if(!t.date || (t.exDates && t.exDates.includes(ds))) return false;
   const target=new Date(ds), origin=new Date(t.date); if(target < origin) return false;
   if(t.date === ds) return true;
   if(!t.repeat || t.repeat === 'none') return false;
@@ -189,15 +199,15 @@ function isVisible(t, ds){
 function renderCal(){
   const grid=g('cgrid'); grid.innerHTML='일월화수목금토'.split('').map(d=>`<div class="dlbl">${d}</div>`).join('');
   g('cal-title').textContent=`${calY}년 ${calM+1}월`;
-  const first=new Date(calY,calM,1).getDay(), last=new Date(calY,calM+1,0).getDate();
+  const first=new Date(calY,calM,1).getDay(), last=new Date(calY,calM+1,0).getDate(), h = getHolidays(calY);
   for(let i=0;i<first;i++) grid.appendChild(document.createElement('div'));
   for(let i=1; i<=last; i++){
     const ds=`${calY}-${String(calM+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`;
-    const cell=document.createElement('div'); cell.className='cell'+(ds===selDay?' sel-day':'');
-    cell.dataset.date=ds; cell.innerHTML=`<div class="cnum">${i}</div>`;
+    const day = new Date(calY, calM, i).getDay(), hn = h[ds];
+    const cell=document.createElement('div'); cell.className=`cell ${ds===selDay?'sel-day':''} ${day===0?'sun':''} ${day===6?'sat':''} ${hn?'holiday':''}`;
+    cell.dataset.date=ds; cell.innerHTML=`<div class="cnum">${i}${hn?`<span class="h-name">${hn}</span>`:''}</div>`;
     todos.filter(t=>isVisible(t,ds)).slice(0,3).forEach(t=>{
-      const l=document.createElement('div'); l.className='cline'; l.draggable=true;
-      const done = isDone(t, ds);
+      const l=document.createElement('div'); l.className='cline'; l.draggable=true; const done = isDone(t, ds);
       l.style=`color:${t.col}; background:${t.col}15; ${done?'text-decoration:line-through;opacity:0.5':''}`;
       l.textContent=(t.priority==='1'?'⭐':'')+t.text;
       l.onmousedown = (e) => { l.dataset.isCopy = e.ctrlKey || e.metaKey; };
@@ -206,17 +216,11 @@ function renderCal(){
     });
     cell.ondragover=e=>e.preventDefault();
     cell.ondrop=async e=>{
-      e.preventDefault();
-      const tid=parseInt(e.dataTransfer.getData('tid')), mode=e.dataTransfer.getData('mode');
-      const t=todos.find(x=>x.id===tid);
-      if(t){
-        if(mode === 'copy') {
-          const newT = {...t, id:Date.now(), date:cell.dataset.date, order:todos.length, exDates:[], doneDates:[]};
-          todos.push(newT); saveT();
-        } else {
-          t.date=cell.dataset.date; if(t.exDates) t.exDates=[]; saveT();
-        }
-      }
+      e.preventDefault(); const tid=parseInt(e.dataTransfer.getData('tid')), mode=e.dataTransfer.getData('mode');
+      const t=todos.find(x=>x.id===tid); if(!t) return;
+      if(mode === 'copy') todos.push({...t, id:Date.now(), date:cell.dataset.date, order:todos.length, exDates:[], doneDates:[]});
+      else { t.date=cell.dataset.date; if(t.exDates) t.exDates=[]; }
+      forceSyncAll();
     };
     cell.onclick=()=>{selDay=ds; renderCal(); renderDayList();};
     grid.appendChild(cell);
@@ -226,15 +230,10 @@ function renderCal(){
 function renderDayList(){
   g('panel-date').textContent=`📅 ${selDay} 일정`;
   const list=g('day-todo-list'); list.innerHTML='';
-  const dayTodos = todos.filter(t=>isVisible(t, selDay));
-  dayTodos.forEach((t)=>{
-    const item=document.createElement('div'); item.className='titem';
-    const done = isDone(t, selDay);
+  todos.filter(t=>isVisible(t, selDay)).forEach((t)=>{
+    const item=document.createElement('div'); item.className='titem'; const done = isDone(t, selDay);
     item.innerHTML=`
-      <div class="order-btns">
-        <button class="order-btn" onclick="moveOrder(${t.id}, -1)">▲</button>
-        <button class="order-btn" onclick="moveOrder(${t.id}, 1)">▼</button>
-      </div>
+      <div class="order-btns"><button class="order-btn" onclick="moveOrder(${t.id}, -1)">▲</button><button class="order-btn" onclick="moveOrder(${t.id}, 1)">▼</button></div>
       <div class="chk ${done?'done':''}" style="border-color:${t.col}; background:${done?t.col:'transparent'}" onclick="toggleT(${t.id}, '${selDay}')">✔</div>
       <div style="flex:1; font-size:15px; ${done?'text-decoration:line-through;color:#aaa':''}">${t.text}</div>
       <button class="btn" style="padding:6px 10px; font-size:12px;" onclick="openEdit(${t.id})">수정</button>
@@ -245,49 +244,59 @@ function renderDayList(){
 }
 
 function toggleT(id, dateStr){
-  const t=todos.find(x=>x.id===id);
-  if(!t.repeat || t.repeat === 'none') {
-    t.done = !t.done;
-  } else {
-    if(!t.doneDates) t.doneDates = [];
-    const idx = t.doneDates.indexOf(dateStr);
-    if(idx > -1) t.doneDates.splice(idx, 1);
-    else t.doneDates.push(dateStr);
-  }
-  saveT();
+  const t=todos.find(x=>x.id===id); if(!t) return;
+  if(!t.repeat || t.repeat === 'none') t.done = !t.done;
+  else { if(!t.doneDates) t.doneDates = []; const idx = t.doneDates.indexOf(dateStr); if(idx > -1) t.doneDates.splice(idx, 1); else t.doneDates.push(dateStr); }
+  forceSyncAll();
 }
 
 function moveOrder(id, dir){
-  const curIdx = todos.findIndex(x => x.id === id);
-  if(curIdx === -1) return;
+  const curIdx = todos.findIndex(x => x.id === id); if(curIdx === -1) return;
   let targetIdx = -1;
-  if(dir === -1) {
-    for(let i = curIdx - 1; i >= 0; i--) { if(isVisible(todos[i], selDay)) { targetIdx = i; break; } }
-  } else {
-    for(let i = curIdx + 1; i < todos.length; i++) { if(isVisible(todos[i], selDay)) { targetIdx = i; break; } }
-  }
-  if(targetIdx !== -1) {
-    [todos[curIdx], todos[targetIdx]] = [todos[targetIdx], todos[curIdx]];
-    saveT();
-  }
+  if(dir === -1) { for(let i = curIdx - 1; i >= 0; i--) { if(isVisible(todos[i], selDay)) { targetIdx = i; break; } } }
+  else { for(let i = curIdx + 1; i < todos.length; i++) { if(isVisible(todos[i], selDay)) { targetIdx = i; break; } } }
+  if(targetIdx !== -1) { [todos[curIdx], todos[targetIdx]] = [todos[targetIdx], todos[curIdx]]; forceSyncAll(); }
 }
 
-function renderAll(){ renderCal(); renderDayList(); renderMemos(); }
+// 메모 저장 버튼 이벤트 리스너 (기존 onclick 대신 명시적으로 수정)
+g('m-save').onclick = async () => {
+  const title = g('m-title').value.trim();
+  const content = g('m-editor').innerHTML;
+  if(!title) { alert('제목을 입력하세요.'); return; }
+
+  if(curMemoEditId) {
+    const idx = memos.findIndex(x => x.id === curMemoEditId);
+    if(idx > -1) { memos[idx].title = title; memos[idx].content = content; }
+    curMemoEditId = null;
+    g('edit-indicator').style.display = 'none';
+  } else {
+    memos.unshift({ id: Date.now(), title, content, ts: new Date().toLocaleString() });
+  }
+
+  // 필드 초기화 및 동기화
+  g('m-title').value = '';
+  g('m-editor').innerHTML = '';
+  await forceSyncAll();
+};
+
+function renderMemos(){ g('memo-list').innerHTML=memos.sort((a,b)=>b.id-a.id).map(m=>`<div class="memo-card"><div class="memo-actions"><button class="btn" onclick="editMemo(${m.id})">편집</button><button class="btn" style="color:red;" onclick="delMemo(${m.id})">삭제</button></div><h4>${m.title}</h4><div style="font-size:14px; margin-top:10px;">${m.content}</div></div>`).join(''); }
+function editMemo(id){ const m=memos.find(x=>x.id===id); if(!m) return; g('m-title').value=m.title; g('m-editor').innerHTML=m.content; curMemoEditId=id; g('edit-indicator').style.display='inline'; window.scrollTo({top:0,behavior:'smooth'});}
+async function delMemo(id){ if(confirm('삭제?')){ memos=memos.filter(x=>x.id!==id); forceSyncAll(); }}
+
+function openEdit(id){ const t=todos.find(x=>x.id===id); curEditId=id; editCol=t.col; g('edit-ti').value=t.text; g('edit-date').value=t.date; g('edit-repeat').value=t.repeat||'none'; g('edit-priority').value=t.priority||'0'; buildPal('edit-pal',false); g('edit-modal').classList.add('on');}
+function submitEdit(){ const t=todos.find(x=>x.id===curEditId); t.text=g('edit-ti').value; t.date=g('edit-date').value; t.repeat=g('edit-repeat').value; t.priority=g('edit-priority').value; t.col=editCol; g('edit-modal').classList.remove('on'); forceSyncAll();}
+function closeEditModal(){ g('edit-modal').classList.remove('on'); }
+
+g('t-add').onclick=async()=>{ const val=g('t-inp').value.trim(); if(!val) return; todos.push({id:Date.now(),text:val,date:selDay,col:selCol,done:false,priority:g('t-priority').value,repeat:g('t-repeat').value,order:todos.length,exDates:[],doneDates:[]}); g('t-inp').value=''; forceSyncAll(); };
+function moveMonth(v){ calM+=v; if(calM<0){calM=11;calY--;} if(calM>11){calM=0;calY++;} renderCal(); }
 function buildPal(target, isMain){ const row=g(target); row.innerHTML=''; COLS.forEach(c=>{ const d=document.createElement('div'); d.className='dot'+((isMain?selCol:editCol)===c?' on':''); d.style.background=c; d.onclick=()=>{if(isMain)selCol=c; else editCol=c; buildPal(target, isMain);}; row.appendChild(d); }); }
-function handleDelete(id){ const t=todos.find(x=>x.id===id); if(t.repeat&&t.repeat!=='none'){pendingDelId=id;g('del-confirm-modal').classList.add('on');}else{if(confirm('삭제?')){setSyncStatus('loading');fetch(`${SB_URL}/rest/v1/todos?id=eq.${id}`,{method:'DELETE',headers:HEADERS}).then(()=>{todos=todos.filter(x=>x.id!==id);renderAll();setSyncStatus('success');});}}}
-async function executeDelete(type){ const targetId=pendingDelId; setSyncStatus('loading'); if(type==='all'){await fetch(`${SB_URL}/rest/v1/todos?id=eq.${targetId}`,{method:'DELETE',headers:HEADERS});todos=todos.filter(x=>x.id!==targetId);}else{const t=todos.find(x=>x.id===targetId);if(!t.exDates)t.exDates=[];t.exDates.push(selDay);await saveT();}g('del-confirm-modal').classList.remove('on');renderAll();setSyncStatus('success');}
+function handleDelete(id){ const t=todos.find(x=>x.id===id); if(t.repeat&&t.repeat!=='none'){pendingDelId=id;g('del-confirm-modal').classList.add('on');}else{if(confirm('삭제?')){todos=todos.filter(x=>x.id!==id);forceSyncAll();}}}
+async function executeDelete(type){ if(type==='all') todos=todos.filter(x=>x.id!==pendingDelId); else { const t=todos.find(x=>x.id===pendingDelId); if(!t.exDates)t.exDates=[]; t.exDates.push(selDay); } g('del-confirm-modal').classList.remove('on'); forceSyncAll();}
 function exec(cmd, val=null){ document.execCommand(cmd, false, val); g('m-editor').focus(); }
 function handleImg(input){ if(input.files && input.files[0]){ const reader=new FileReader(); reader.onload=e=>document.execCommand('insertImage', false, e.target.result); reader.readAsDataURL(input.files[0]); } }
-g('m-save').onclick=async()=>{ const title=g('m-title').value, content=g('m-editor').innerHTML; if(!title)return; setSyncStatus('loading'); if(curMemoEditId){const m=memos.find(x=>x.id===curMemoEditId);m.title=title;m.content=content;curMemoEditId=null;g('edit-indicator').style.display='none';}else{memos.push({id:Date.now(),title,content,ts:new Date().toLocaleString()});}renderMemos();g('m-title').value='';g('m-editor').innerHTML='';await fetch(SB_URL+'/rest/v1/memos',{method:'POST',headers:{...HEADERS,'Prefer':'resolution=merge-duplicates'},body:JSON.stringify(memos.map(m=>({id:m.id,data:m}))) });setSyncStatus('success');};
-function renderMemos(){ g('memo-list').innerHTML=memos.sort((a,b)=>b.id-a.id).map(m=>`<div class="memo-card"><div class="memo-actions"><button class="btn" onclick="editMemo(${m.id})">편집</button><button class="btn" style="color:red;" onclick="delMemo(${m.id})">삭제</button></div><h4>${m.title}</h4><div style="font-size:14px; margin-top:10px;">${m.content}</div></div>`).join(''); }
-function editMemo(id){ const m=memos.find(x=>x.id===id);g('m-title').value=m.title;g('m-editor').innerHTML=m.content;curMemoEditId=id;g('edit-indicator').style.display='inline';window.scrollTo({top:0,behavior:'smooth'});}
-async function delMemo(id){ if(confirm('삭제?')){setSyncStatus('loading');await fetch(`${SB_URL}/rest/v1/memos?id=eq.${id}`,{method:'DELETE',headers:HEADERS});memos=memos.filter(x=>x.id!==id);renderMemos();setSyncStatus('success');}}
-function openEdit(id){ const t=todos.find(x=>x.id===id);curEditId=id;editCol=t.col;g('edit-ti').value=t.text;g('edit-date').value=t.date;g('edit-repeat').value=t.repeat||'none';g('edit-priority').value=t.priority||'0';buildPal('edit-pal',false);g('edit-modal').classList.add('on');}
-function submitEdit(){ const t=todos.find(x=>x.id===curEditId);t.text=g('edit-ti').value;t.date=g('edit-date').value;t.repeat=g('edit-repeat').value;t.priority=g('edit-priority').value;t.col=editCol;g('edit-modal').classList.remove('on');saveT();}
-function closeEditModal(){ g('edit-modal').classList.remove('on'); }
-g('t-add').onclick=async()=>{ const val=g('t-inp').value.trim(); if(!val) return; const newT={id:Date.now(),text:val,date:selDay,col:selCol,done:false,priority:g('t-priority').value,repeat:g('t-repeat').value,order:todos.length,exDates:[],doneDates:[]}; todos.push(newT); g('t-inp').value=''; saveT(); };
-function moveMonth(v){ calM+=v; if(calM<0){calM=11;calY--;} if(calM>11){calM=0;calY++;} renderCal(); }
+function renderAll(){ renderCal(); renderDayList(); renderMemos(); }
 g('tabs').onclick=e=>{ const t=e.target.dataset.tab; if(!t)return; document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on',b.dataset.tab===t)); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+t));};
+
 init();
 </script>
 </body>
